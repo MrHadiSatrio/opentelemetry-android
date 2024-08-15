@@ -16,6 +16,7 @@ dependencies {
     api(project(":instrumentation:fragment"))
     api(project(":instrumentation:crash"))
     api(project(":instrumentation:startup"))
+    api(project(":instrumentation:strictmode"))
     api(project(":instrumentation:slowrendering"))
     api(project(":instrumentation:anr"))
     api(project(":instrumentation:network"))
