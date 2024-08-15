@@ -23,7 +23,6 @@ import io.opentelemetry.api.common.Attributes;
 import io.opentelemetry.api.common.AttributesBuilder;
 import io.opentelemetry.api.logs.Logger;
 import io.opentelemetry.sdk.OpenTelemetrySdk;
-import io.opentelemetry.sdk.logs.SdkLoggerProvider;
 import java.io.PrintWriter;
 import java.io.StringWriter;
 import java.util.concurrent.Executor;
@@ -40,28 +39,60 @@ public class StrictModeViolationInstrumentation implements AndroidInstrumentatio
     public void install(
             @NonNull Application application, @NonNull OpenTelemetryRum openTelemetryRum) {
         OpenTelemetrySdk openTelemetrySdk = (OpenTelemetrySdk) openTelemetryRum.getOpenTelemetry();
-        StrictMode.OnThreadViolationListener threadViolationListener =
-                new ThreadViolationListener(openTelemetrySdk.getSdkLoggerProvider());
-        StrictMode.ThreadPolicy threadPolicy =
+        ViolationListener listener = new ViolationListener(openTelemetrySdk);
+
+        StrictMode.setThreadPolicy(
                 new StrictMode.ThreadPolicy.Builder()
                         .detectAll()
-                        .penaltyListener(executor, threadViolationListener)
-                        .build();
-        StrictMode.setThreadPolicy(threadPolicy);
+                        .penaltyListener(executor, new ThreadViolationListener(listener))
+                        .build());
+        StrictMode.setVmPolicy(
+                new StrictMode.VmPolicy.Builder()
+                        .detectAll()
+                        .penaltyListener(executor, new VmViolationListener(listener))
+                        .build());
     }
 
-    static class ThreadViolationListener implements StrictMode.OnThreadViolationListener {
-        private final Logger logger;
+    static class VmViolationListener
+            implements StrictMode.OnVmViolationListener { // TODO: Pull out and clean up.
+        private final ViolationListener listener;
 
-        public ThreadViolationListener(SdkLoggerProvider sdkLoggerProvider) {
-            this.logger =
-                    sdkLoggerProvider
-                            .loggerBuilder("io.opentelemetry.android.strictmode.thread")
-                            .build();
+        VmViolationListener(ViolationListener listener) {
+            this.listener = listener;
+        }
+
+        @Override
+        public void onVmViolation(Violation violation) {
+            listener.onViolation(violation);
+        }
+    }
+
+    static class ThreadViolationListener
+            implements StrictMode.OnThreadViolationListener { // TODO: Pull out and clean up.
+        private final ViolationListener listener;
+
+        ThreadViolationListener(ViolationListener listener) {
+            this.listener = listener;
         }
 
         @Override
         public void onThreadViolation(Violation violation) {
+            listener.onViolation(violation);
+        }
+    }
+
+    static class ViolationListener { // TODO: Pull out and clean up.
+        private final Logger logger;
+
+        public ViolationListener(OpenTelemetrySdk openTelemetrySdk) {
+            this.logger =
+                    openTelemetrySdk
+                            .getSdkLoggerProvider()
+                            .loggerBuilder("io.opentelemetry.android.strictmode")
+                            .build();
+        }
+
+        public void onViolation(Violation violation) {
             AttributesBuilder attributesBuilder =
                     Attributes.builder()
                             .put(EXCEPTION_ESCAPED, false)
